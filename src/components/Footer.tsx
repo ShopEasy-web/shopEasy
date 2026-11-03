@@ -23,7 +23,7 @@ export function Footer({ onNavigate }: FooterProps) {
           <div className="lg:col-span-2">
             <div className="flex items-center space-x-2 mb-4">
               <div className="w-10 h-10 bg-gradient-to-br from-[#005EEA] to-purple-600 rounded-xl flex items-center justify-center">
-                <span className="text-white">SE</span>
+                <span className="text-white">SS</span>
               </div>
               <span className="text-white">ShopSpot</span>
             </div>
