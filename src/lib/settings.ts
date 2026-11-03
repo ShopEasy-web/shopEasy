@@ -1,5 +1,5 @@
 // Centralized settings management for ShopSpot
-// Settings are stored ONLY in Supabase (no localStorage)
+// Settings are stored in the app_settings.site_settings JSONB column.
 
 import { createClient } from '@supabase/supabase-js';
 import { projectId, publicAnonKey } from '../utils/supabase/info';
@@ -113,29 +113,49 @@ const supabase = createClient(
   publicAnonKey
 );
 
-// Get settings from Supabase (direct database query - NO Edge Functions)
+const isNetworkFailure = (error: unknown) => {
+  const message =
+    typeof error === 'object' && error && 'message' in error
+      ? String((error as { message?: unknown }).message)
+      : String(error);
+
+  return message.toLowerCase().includes('failed to fetch');
+};
+
+const reportSettingsError = (context: string, error: unknown) => {
+  // Figma previews can temporarily block external requests. This is an
+  // expected offline state, so use the built-in defaults without raising
+  // an error overlay.
+  if (isNetworkFailure(error)) {
+    console.warn(`${context}: Supabase is unreachable; using ShopSpot defaults.`);
+    return;
+  }
+
+  console.error(context, error);
+};
+
+// Get settings from the same app_settings table used by the Edge Function.
 export async function getSettings(): Promise<SiteSettings> {
   try {
-    // Query the site_settings table directly
     const { data, error } = await supabase
-      .from('site_settings')
-      .select('settings')
+      .from('app_settings')
+      .select('site_settings')
       .limit(1)
-      .single();
+      .maybeSingle();
 
     if (error) {
-      console.error('Error fetching settings from database:', error);
+      reportSettingsError('Unable to load settings from Supabase', error);
       return DEFAULT_SETTINGS;
     }
 
-    if (data && data.settings) {
+    if (data?.site_settings) {
       // Merge with defaults to ensure all fields exist
-      return { ...DEFAULT_SETTINGS, ...data.settings };
+      return { ...DEFAULT_SETTINGS, ...data.site_settings };
     }
 
     return DEFAULT_SETTINGS;
   } catch (error) {
-    console.error('Error loading settings:', error);
+    reportSettingsError('Unable to load settings from Supabase', error);
     return DEFAULT_SETTINGS;
   }
 }
@@ -145,46 +165,43 @@ export function getSettingsSync(): SiteSettings {
   return DEFAULT_SETTINGS;
 }
 
-// Save settings to Supabase (direct database update - NO localStorage, NO Edge Functions)
+// Save settings to app_settings.site_settings.
 export async function saveSettings(settings: SiteSettings): Promise<boolean> {
   try {
-    // First, get the ID of the settings row
     const { data: existingData, error: fetchError } = await supabase
-      .from('site_settings')
+      .from('app_settings')
       .select('id')
       .limit(1)
-      .single();
+      .maybeSingle();
 
-    if (fetchError && fetchError.code !== 'PGRST116') {
-      // PGRST116 = no rows, which is OK
-      console.error('Error fetching settings ID:', fetchError);
+    if (fetchError) {
+      reportSettingsError('Unable to locate ShopSpot settings', fetchError);
       return false;
     }
 
     if (existingData && existingData.id) {
-      // Update existing row
       const { error: updateError } = await supabase
-        .from('site_settings')
+        .from('app_settings')
         .update({
-          settings: settings,
-          updated_at: new Date().toISOString(),
+          site_settings: settings,
+          last_updated: new Date().toISOString(),
         })
         .eq('id', existingData.id);
 
       if (updateError) {
-        console.error('Error updating settings:', updateError);
+        reportSettingsError('Unable to update ShopSpot settings', updateError);
         return false;
       }
     } else {
-      // Insert new row
       const { error: insertError } = await supabase
-        .from('site_settings')
+        .from('app_settings')
         .insert({
-          settings: settings,
+          site_settings: settings,
+          last_updated: new Date().toISOString(),
         });
 
       if (insertError) {
-        console.error('Error inserting settings:', insertError);
+        reportSettingsError('Unable to create ShopSpot settings', insertError);
         return false;
       }
     }
@@ -196,7 +213,7 @@ export async function saveSettings(settings: SiteSettings): Promise<boolean> {
 
     return true;
   } catch (error) {
-    console.error('Error saving settings to database:', error);
+    reportSettingsError('Unable to save settings to Supabase', error);
     return false;
   }
 }
