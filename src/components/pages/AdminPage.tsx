@@ -81,6 +81,8 @@ export function AdminPage({ onNavigate }: AdminPageProps) {
   const [newScreenshotCaption, setNewScreenshotCaption] = useState('');
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
+  const [apkFile, setApkFile] = useState<File | null>(null);
+  const [uploadingApk, setUploadingApk] = useState(false);
 
   const supabase = createClient(
     `https://${projectId}.supabase.co`,
@@ -403,6 +405,65 @@ export function AdminPage({ onNavigate }: AdminPageProps) {
       console.error('Error updating app settings:', err);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleApkUpload = async () => {
+    if (!apkFile) {
+      setError('Choose an Android APK file first');
+      return;
+    }
+    if (!apkFile.name.toLowerCase().endsWith('.apk')) {
+      setError('Only .apk files can be uploaded');
+      return;
+    }
+
+    setUploadingApk(true);
+    setError('');
+    setSuccessMessage('');
+    try {
+      const filePath = `releases/shopspot-${Date.now()}.apk`;
+      const { error: uploadError } = await supabase.storage
+        .from('apk-files')
+        .upload(filePath, apkFile, {
+          contentType: 'application/vnd.android.package-archive',
+          upsert: false,
+        });
+
+      if (uploadError) throw uploadError;
+
+      const { data: publicFile } = supabase.storage
+        .from('apk-files')
+        .getPublicUrl(filePath, { download: `ShopSpot-${appSettings.apkVersion || 'latest'}.apk` });
+
+      const { data: existing } = await supabase
+        .from('app_settings')
+        .select('id')
+        .limit(1)
+        .maybeSingle();
+
+      const values = {
+        play_store_url: appSettings.playStoreUrl,
+        app_store_url: appSettings.appStoreUrl,
+        apk_download_url: publicFile.publicUrl,
+        apk_version: appSettings.apkVersion,
+        last_updated: new Date().toISOString(),
+      };
+
+      const result = existing?.id
+        ? await supabase.from('app_settings').update(values).eq('id', existing.id)
+        : await supabase.from('app_settings').insert(values);
+
+      if (result.error) throw result.error;
+
+      setAppSettings((current) => ({ ...current, apkDownloadUrl: publicFile.publicUrl }));
+      setSettings((current) => ({ ...current, apkDownloadUrl: publicFile.publicUrl }));
+      setApkFile(null);
+      setSuccessMessage('APK uploaded. Visitors can now download it directly from ShopSpot.');
+    } catch (err: any) {
+      setError(err.message || 'APK upload failed. Check the apk-files storage bucket permissions.');
+    } finally {
+      setUploadingApk(false);
     }
   };
 
@@ -839,46 +900,44 @@ export function AdminPage({ onNavigate }: AdminPageProps) {
               <div className="space-y-8">
                 <div>
                   <h2 className="text-gray-900 mb-2">App Downloads</h2>
-                  <p className="text-gray-600 mb-6">Manage mobile app download links</p>
+                  <p className="text-gray-600 mb-6">Upload and manage the mobile app visitors download directly from ShopSpot.</p>
                 </div>
 
                 <div className="space-y-6">
                   <div>
-                    <label className="block text-gray-900 mb-2">Android APK Download URL</label>
-                    <input
-                      type="url"
-                      value={settings.apkDownloadUrl}
-                      onChange={(e) => setSettings({ ...settings, apkDownloadUrl: e.target.value })}
-                      placeholder="https://yourserver.com/shopspot.apk"
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#005EEA] focus:border-transparent"
-                    />
-                    <p className="text-sm text-gray-500 mt-2">Direct link to your APK file (can be hosted on Google Drive, Dropbox, or your server)</p>
+                    <label className="block text-gray-900 mb-2">Android APK file</label>
+                    <div className="rounded-xl border-2 border-dashed border-blue-200 bg-blue-50/60 p-6">
+                      <input
+                        type="file"
+                        accept=".apk,application/vnd.android.package-archive"
+                        onChange={(e) => setApkFile(e.target.files?.[0] || null)}
+                        className="block w-full text-sm text-gray-600 file:mr-4 file:rounded-full file:border-0 file:bg-[#005EEA] file:px-5 file:py-2.5 file:text-white"
+                      />
+                      <p className="mt-3 text-sm text-gray-600">
+                        {apkFile ? `${apkFile.name} · ${(apkFile.size / 1024 / 1024).toFixed(1)} MB` : 'The APK is stored in ShopSpot Supabase Storage—no Google Drive link required.'}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={handleApkUpload}
+                        disabled={!apkFile || uploadingApk}
+                        className="mt-4 flex items-center gap-2 rounded-full bg-[#005EEA] px-5 py-2.5 text-white transition hover:bg-[#0047B3] disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <Upload size={18} />
+                        {uploadingApk ? 'Uploading APK…' : 'Upload APK directly'}
+                      </button>
+                    </div>
+                    {appSettings.apkDownloadUrl && (
+                      <p className="mt-3 break-all text-sm text-green-700">
+                        Active direct download: {appSettings.apkDownloadUrl}
+                      </p>
+                    )}
                   </div>
 
                   <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
-                    <h3 className="text-gray-900 mb-3">📱 How to Upload Your APK</h3>
-                    <div className="space-y-2 text-sm text-gray-700">
-                      <p><strong>Option 1: Google Drive</strong></p>
-                      <ol className="list-decimal list-inside space-y-1 ml-4">
-                        <li>Upload your APK to Google Drive</li>
-                        <li>Right-click → Share → Change to "Anyone with the link"</li>
-                        <li>Copy the sharing link and paste it above</li>
-                      </ol>
-                      
-                      <p className="mt-4"><strong>Option 2: Dropbox</strong></p>
-                      <ol className="list-decimal list-inside space-y-1 ml-4">
-                        <li>Upload APK to Dropbox</li>
-                        <li>Click "Share" → "Create link"</li>
-                        <li>Copy link and paste above</li>
-                      </ol>
-
-                      <p className="mt-4"><strong>Option 3: GitHub Releases</strong></p>
-                      <ol className="list-decimal list-inside space-y-1 ml-4">
-                        <li>Go to your repository → Releases → Create new release</li>
-                        <li>Upload APK as a release asset</li>
-                        <li>Copy the download URL</li>
-                      </ol>
-                    </div>
+                    <h3 className="text-gray-900 mb-3">Direct website delivery</h3>
+                    <p className="text-sm leading-6 text-gray-700">
+                      Uploading a new file publishes it to the ShopSpot download page. The visitor stays on the website and the browser immediately saves the APK.
+                    </p>
                   </div>
 
                   <div>
