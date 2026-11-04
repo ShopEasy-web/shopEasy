@@ -422,42 +422,28 @@ export function AdminPage({ onNavigate }: AdminPageProps) {
     setError('');
     setSuccessMessage('');
     try {
-      const filePath = `releases/shopspot-${Date.now()}.apk`;
-      const { error: uploadError } = await supabase.storage
-        .from('apk-files')
-        .upload(filePath, apkFile, {
-          contentType: 'application/vnd.android.package-archive',
-          upsert: false,
-        });
+      const formData = new FormData();
+      formData.append('file', apkFile);
+      formData.append('version', appSettings.apkVersion || 'latest');
 
-      if (uploadError) throw uploadError;
+      const response = await fetch(
+        `https://${projectId}.supabase.co/functions/v1/make-server-96ec88bb/admin/apk`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${ADMIN_PASSWORD}`,
+          },
+          body: formData,
+        },
+      );
 
-      const { data: publicFile } = supabase.storage
-        .from('apk-files')
-        .getPublicUrl(filePath, { download: `ShopSpot-${appSettings.apkVersion || 'latest'}.apk` });
+      const result = await response.json();
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || 'APK upload failed');
+      }
 
-      const { data: existing } = await supabase
-        .from('app_settings')
-        .select('id')
-        .limit(1)
-        .maybeSingle();
-
-      const values = {
-        play_store_url: appSettings.playStoreUrl,
-        app_store_url: appSettings.appStoreUrl,
-        apk_download_url: publicFile.publicUrl,
-        apk_version: appSettings.apkVersion,
-        last_updated: new Date().toISOString(),
-      };
-
-      const result = existing?.id
-        ? await supabase.from('app_settings').update(values).eq('id', existing.id)
-        : await supabase.from('app_settings').insert(values);
-
-      if (result.error) throw result.error;
-
-      setAppSettings((current) => ({ ...current, apkDownloadUrl: publicFile.publicUrl }));
-      setSettings((current) => ({ ...current, apkDownloadUrl: publicFile.publicUrl }));
+      setAppSettings((current) => ({ ...current, apkDownloadUrl: result.apkDownloadUrl }));
+      setSettings((current) => ({ ...current, apkDownloadUrl: result.apkDownloadUrl }));
       setApkFile(null);
       setSuccessMessage('APK uploaded. Visitors can now download it directly from ShopSpot.');
     } catch (err: any) {
