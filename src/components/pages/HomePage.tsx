@@ -4,8 +4,8 @@ import { ImageWithFallback } from '../figma/ImageWithFallback';
 import { CONTACT_INFO } from '../ContactInfo';
 import { openYouTubePlaylist } from '../../lib/settings';
 import { useSettings } from '../../lib/useSettings';
-import dashboardImage from 'figma:asset/503cdb7f69b403d177c0ab1f10c659026cbc3827.png';
-import mobileAppImage from 'figma:asset/976aec07f1cfa552efa95a68fdb014e75e5aff83.png';
+import dashboardImage from '../../../imports/WhatsApp_Image_2026-11-03_at_4.21.07_PM.jpeg';
+import mobileAppImage from '../../../imports/WhatsApp_Image_2026-11-03_at_4.21.06_PM__3_.jpeg';
 
 interface HomePageProps {
   onNavigate: (page: PageType) => void;
